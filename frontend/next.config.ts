@@ -24,7 +24,51 @@ const analyzer = withBundleAnalyzer({
  *   ANALYZE=true npm run build
  */
 
+/**
+ * Security headers applied to every route via next.config.ts.
+ * The middleware (src/middleware.ts) also sets these at runtime so they are
+ * present on both static and dynamic responses.
+ *
+ * `upgrade-insecure-requests` is omitted here because next.config.ts headers
+ * run in all environments; the middleware applies it in production only.
+ */
+const securityHeaders = [
+  {
+    key: "Content-Security-Policy",
+    value: [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob: https://*.stellar.org",
+      "font-src 'self'",
+      "connect-src 'self' wss: https: https://*.sentry.io",
+      "frame-src 'none'",
+      "frame-ancestors 'none'",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+    ].join("; "),
+  },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  {
+    key: "Permissions-Policy",
+    value: "camera=(), microphone=(), geolocation=()",
+  },
+];
+
 const nextConfig: NextConfig = {
+  output: 'standalone',
+  compress: true,
+  async headers() {
+    return [
+      {
+        source: "/(.*)",
+        headers: securityHeaders,
+      },
+    ];
+  },
   experimental: {
     optimizePackageImports: [
       "lucide-react",
@@ -34,9 +78,9 @@ const nextConfig: NextConfig = {
       "d3-force-3d",
       "react-force-graph-2d",
     ],
-    turbopack: {
-      root: '../',
-    },
+  },
+  turbopack: {
+    root: '../',
   },
   images: {
     formats: ['image/webp', 'image/avif'],
@@ -53,6 +97,15 @@ const nextConfig: NextConfig = {
   },
   webpack: (config, { isServer }) => {
     if (!isServer) {
+      // Performance budgets — raw sizes (pre-gzip).
+      // 500 KB raw ≈ ~200 KB gzipped, matching the documented budget.
+      // In CI (process.env.CI=true) violations are errors; locally they are warnings.
+      config.performance = {
+        hints: process.env.CI ? 'error' : 'warning',
+        maxAssetSize: 500 * 1024,       // 500 KB per asset
+        maxEntrypointSize: 500 * 1024,  // 500 KB per entrypoint
+      };
+
       config.optimization = {
         ...config.optimization,
         splitChunks: {
@@ -102,6 +155,9 @@ export default analyzer(withNextIntl(withPWA({
   aggressiveFrontEndNavCaching: true,
   reloadOnOnline: true,
   disable: process.env.NODE_ENV === "development",
+  fallbacks: {
+    document: "/offline",
+  },
   workboxOptions: {
     disableDevLogs: true,
   },
